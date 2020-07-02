@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: valaxy-service
+  name: pkdev-service
   labels:
-    app: valaxy-devops-project
+    app: pkdev-devops-project
 spec:
   selector:
-    app: valaxy-devops-project
+    app: pkdev-devops-project
   type: LoadBalancer
   ports:
     - port: 8080

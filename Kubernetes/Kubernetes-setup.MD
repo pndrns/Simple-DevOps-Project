@@ -37,17 +37,17 @@
 1. Create a Route53 private hosted zone (you can create Public hosted zone if you have a domain)
    ```sh
    Routeh53 --> hosted zones --> created hosted zone  
-   Domain Name: valaxy.net
+   Domain Name: pkdev.net
    Type: Private hosted zone for Amzon VPC
    ```
 
 1. create an S3 bucket
    ```sh
-    aws s3 mb s3://demo.k8s.valaxy.net
+    aws s3 mb s3://demo.k8s.pkdev.net
    ```
 1. Expose environment variable:
    ```sh
-    export KOPS_STATE_STORE=s3://demo.k8s.valaxy.net
+    export KOPS_STATE_STORE=s3://demo.k8s.pkdev.net
    ```
 
 1. Create sshkeys before creating cluster
@@ -57,12 +57,12 @@
 
 1. Create kubernetes cluster definitions on S3 bucket
    ```sh
-   kops create cluster --cloud=aws --zones=ap-south-1b --name=demo.k8s.valaxy.net --dns-zone=valaxy.net --dns private 
+   kops create cluster --cloud=aws --zones=us-east-2b --name=demo.k8s.pkdev.net --dns-zone=pkdev.net --dns private 
     ```
 
 1. Create kubernetes cluser
     ```sh
-    kops update cluster demo.k8s.valaxy.net --yes
+    kops update cluster demo.k8s.pkdev.net --yes
     ```
 
 1. Validate your cluster
@@ -77,14 +77,14 @@
 
 1. To delete cluster
     ```sh
-     kops delete cluster demo.k8s.valaxy.net --yes
+     kops delete cluster demo.k8s.pkdev.net --yes
     ```
    
 #### Deploying Nginx pods on Kubernetes
 1. Deploying Nginx Container
     ```sh
     kubectl run sample-nginx --image=nginx --replicas=2 --port=80
-    # kubectl run simple-devops-project --image=yankils/simple-devops-image --replicas=2 --port=8080
+    # kubectl run simple-devops-project --image=pndrns/simple-devops-image --replicas=2 --port=8080
     kubectl get pods
     kubectl get deployments
    ```
