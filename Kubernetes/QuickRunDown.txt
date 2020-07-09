@@ -1,0 +1,231 @@
+QuickRunDown
+As a developer push code to gitHub -> Jenkins runs the CI job (CB) -> Builds war file -> Push to Ansible host (CDel)  -> Run Ansible playbook (Build image on local -> Push to Docker hub & delete from localhost)
+=> Jenkins runs the CD job (CDep) -> Ansible then initiates the deployment (deploy & service) -> k8s master pulls latest image and create deploy & service
+
+Machines
+1(Java -> Jenkins -> Git -> Maven) -> 2(Docker + Ansible) -> 3 (k8s mgmt) -> 4 (k8s cluster)
+Flow
+Make Jenkins -> Ansible/Docker Host ready 
+mgmt server: Make k8s ready (aws cli, kubectl, kops, install k8s)
+Master: Create deploy & service yml files
+Ansible host: password less to Master, Ansible playbooks under k8s (create image, Dockerfile, deploy, service, hosts) + permissions to ansadmin:ansadmin
+Jenkins host: Create jobs + have Code
+CIJob -> Maven project, Poll SCM, Push war file to Ansible host, Run create image playbook.
+CDJob -> Free style project, Run Ansible playbooks deploy, service files.
+Connect CIJob -> CDJob
+
+mgmt server: 
+Make k8s ready (aws cli, kubectl, kops, install k8s)
+Create Ubuntu EC2 instance (t2.micro)
+install AWSCLI
+curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip -o awscli-bundle.zip
+apt install unzip python
+unzip awscli-bundle.zip
+./awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+/usr/local/bin/aws --version
+Install kubectl on ubuntu instance
+curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+Install kops on ubuntu instance
+curl -LO https://github.com/kubernetes/kops/releases/download/$(curl -s https://api.github.com/repos/kubernetes/kops/releases/latest | grep tag_name | cut -d '"' -f 4)/kops-linux-amd64
+chmod +x kops-linux-amd64
+-
+Create an IAM user/role with Route53, EC2, IAM and S3 full access (IAM: EC2fu, Route53fu, IAMfu, S3fu)
+Attach IAM role to ubuntu instance (Instance -> Attach/Replace IAM Role)
+aws configure
+AWS Access Key ID [None]: 
+AWS Secret Access Key [None]: 
+Default region name [None]: us-east-2 
+Default output format [None]: 
+Create a Route53 private hosted zone (you can create Public hosted zone if you have a domain)
+Routeh53 --> hosted zones --> created hosted zone  
+Domain Name: pkdev.net
+Type: Private hosted zone for Amazon VPC
+ create an S3 bucket
+aws s3 mb s3://demopk.k8s.pkdev.net
+Expose environment variable:
+export KOPS_STATE_STORE=s3://demopk.k8s.pkdev.net
+Create sshkeys before creating cluster
+ssh-keygen
+Create kubernetes cluster definitions on S3 bucket
+kops create cluster --cloud=aws --zones=us-east-2c --name=demopk.k8s.pkdev.net --dns-zone=pkdev.net --dns private
+Suggestions:
+ * list clusters with: kops get cluster
+ * edit this cluster with: kops edit cluster demopk.k8s.pkdev.net
+ * edit your node instance group: kops edit ig --name=demopk.k8s.pkdev.net nodes
+ * edit your master instance group: kops edit ig --name=demopk.k8s.pkdev.net master-us-east-2c
+** Change machineType: t2.micro
+Create kubernetes cluster
+kops update cluster --name demopk.k8s.pkdev.net --yes
+Suggestions:
+ *validate cluster: kops validate cluster
+ * list nodes: kubectl get nodes --show-labels
+ * ssh to the master: ssh -i ~/.ssh/id_rsa admin@api.demopk.k8s.pkdev.net
+
+Delete kubernetes cluster
+kops delete cluster demopk.k8s.pkdev.net --yes
+** Delete/Check manually: Autoscaling grp, Launch config, VPC, Route 53, S3 buckets.
+
+Master: Create deploy & service yml files
+* ssh to the master: ssh -i ~/.ssh/id_rsa admin@api.demopk.k8s.pkdev.net
+** Deployment -> Replicaset (PODS) -> To access pods/app, we need to have a service, expose our app to outside of the cluster.
+Expose the deployment as service. This will create an ELB in front of those 2 containers and allow us to publicly access them.
+Open the external port (in this case 31200) under Security groups masters.demopk.k8s.pkdev.net. On the Master node.
+cat > pkdev-deploy.yml
+cat > pkdev-service.yml
+pkdev-deploy.yml
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: pkdev-deployment
+spec:
+  selector:
+    matchLabels:
+      app: pkdev-devops-project
+  replicas: 2 # tells deployment to run 2 pods matching the template
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+
+  template:
+    metadata:
+      labels:
+        app: pkdev-devops-project
+    spec:
+      containers:
+      - name: pkdev-devops-project
+        image: pndrns/simple-devops-image
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+pkdev-service.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: pkdev-service
+  labels:
+    app: pkdev-devops-project
+spec:
+  selector:
+    app: pkdev-devops-project
+  type: LoadBalancer
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 31200
+
+Ansible host: 
+[ansadmin@ansible k8s]$ docker login
+password less to Master, Ansible playbooks under k8s (create image, Dockerfile, deploy, service, hosts) + permissions to ansadmin:ansadmin
+[ansadmin@ansible .ssh]$ cat id_rsa.pub
+admin@ip-172-20-42-239:~/.ssh$ cat >> authorized_keys
+From ansible host : ssh -i ~/.ssh/id_rsa admin@18.216.126.153 (public ip of k8s master, as part of diff VPC)
+[ansadmin@ansible opt]$ sudo mkdir k8s
+[ansadmin@ansible opt]$ cd k8s/
+sudo chown -R ansadmin:ansadmin /opt/k8s/
+[ansadmin@ansible k8s]$ sudo vi hosts
+[ansible-server]
+localhost
+
+[kubernetes]
+18.216.126.153
+Create ansible playbooks to create deployment and services
+[ansadmin@ansible k8s]$ cat > kubernetes-pkdev-deployment.yml
+[ansadmin@ansible k8s]$ cat > kubernetes-pkdev-service.yml
+[ansadmin@ansible k8s]$ cat > create-simple-devops-image.yml
+[ansadmin@ansible k8s]$ cat > Dockerfile
+Kubernetes-pkdev-deployment.yml
+---
+- name: Create pods using deployment 
+  hosts: kubernetes 
+  #become: true
+  user: admin
+ 
+  tasks: 
+  - name: create a deployment
+    command: kubectl apply -f pkdev-deploy.yml
+ 
+  - name: update deployment with new pods if image updated in docker hub
+    command: kubectl rollout restart deployment.v1.apps/pkdev-deployment
+Kubernetes-pkdev-service.yml
+---
+- name: create service for deployment
+  hosts: kubernetes
+  #become: true
+  user: admin
+
+  tasks:
+  - name: create a service
+    command: kubectl apply -f pkdev-service.yml
+Create-simple-devops-image.yml
+---
+- hosts: ansible-server
+  become: true
+
+  tasks:
+  - name: create docker image using war file
+    command: docker build -t simple-devops-image:latest .
+    args:
+      chdir: /opt/k8s
+
+  - name: create tag to image
+    command: docker tag simple-devops-image pndrns/simple-devops-image
+
+  - name: push image on to dockerhub
+    command: docker push pndrns/simple-devops-image
+
+  - name: remove docker images from ansible server
+    command: docker rmi simple-devops-image:latest pndrns/simple-devops-image
+    ignore_errors: yes
+Dockerfile
+FROM tomcat:latest
+
+MAINTAINER Pradeep Kumar
+
+COPY ./webapp.war /usr/local/tomcat/webapps
+
+Jenkins host: Create jobs + have Code
+Add Ansible server: Manage Jenkins -> Configure Systems -> Publish over SSH -> Add SSH Servers (Can provide private ip, ip addr)
+CIJob -> Maven project, Poll SCM, Push war file to Ansible host, Run create image playbook.
+GIT repo -> https://github.com/devops-shankar/hello-world.git
+Goals and options -> clean install package
+Build Triggers -> Poll SCM
+Schedule: * * * * * (min, hour, day, month, week) - Every min
+**/*.war, /webapp/target, //opt/k8s, ansible-playbook -i /opt/k8s/hosts /opt/k8s/create-simple-devops-image.yml;
+
+CDJob -> Free style project, Run Ansible playbooks deploy -> service files.
+ansible-playbook -i /opt/k8s/hosts /opt/k8s/kubernetes-pkdev-deployment.yml;
+ansible-playbook -i /opt/k8s/hosts /opt/k8s/kubernetes-pkdev-service.yml
+Connect CIJob -> CDJob. Update deploy_on_kubernetes_CI  job => Post-build Actions -> Build other project (CD Job)
+Change index.jsp under /home/ec2-user/hello-world/webapp/src/main/webapp on Jenkins host to trigger auto build.
+http://18.216.126.153:31200/webapp/
+Quick Commands:
+git init
+git config --global user.name "pradeep kumar"
+git config --global user.email "pnd.rns1@gmail.com"
+git config --global core.editor vi
+git config --global color.ui auto
+cat ~/ .gitconfig - home dir
+git remote add origin https://github.com/devops-shankar/hello-world.git
+git remote show origin
+git clone https://github.com/devops-shankar/hello-world.git
+Modify index.jsp under cd webapp/src/main/webapp/ 
+git status
+git commit -a -m “Updated”
+git push origin master
+git push origin master
+
+
+docker image ls
+docker pull tomcat:latest
+docker exec -it tomcat /bin/bash
+docker build -t simple-devops-image .; 
+docker run -d --name simple-devops-container -p 8080:8080 simple-devops-image;
+docker ps -a
+docker rm
+docker rmi simple-devops-image tomcat
+
+kubectl exec --stdin --tty <POD name> -- /bin/bash
